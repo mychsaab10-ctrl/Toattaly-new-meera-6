@@ -8,23 +8,13 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-
-      - name: Unzip project (newest zip only)
+      - name: Unzip project (if uploaded as a zip)
         run: |
-          rm -rf _src
-          z=$(ls -t *.zip 2>/dev/null | head -n 1 || true)
-          if [ -n "$z" ]; then
-            echo "Using zip: $z"
-            unzip -q -o "$z" -d _src
-          else
-            echo "No zip in repo root, using repo files"
-          fi
-
+          for z in *.zip; do [ -f "$z" ] && unzip -q -o "$z" -d _src; done || true
       - name: Find project folder
         id: proj
         run: |
@@ -33,37 +23,17 @@ jobs:
           d=$(dirname "$f")
           echo "Project folder: $d"
           echo "dir=$d" >> "$GITHUB_OUTPUT"
-
       - name: Accept SDK licenses and get platform 34
         run: |
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0" || true
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
-
       - name: Build
         working-directory: ${{ steps.proj.outputs.dir }}
-        run: |
-          set -o pipefail
-          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
-
-      - name: Show compile errors (only if build failed)
-        if: failure()
-        working-directory: ${{ steps.proj.outputs.dir }}
-        run: |
-          echo "===== KOTLIN / BUILD ERRORS ====="
-          grep -E "^e: |error:|What went wrong" -A3 build.log | head -80 || true
-
+        run: gradle assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: MeeraAI-debug-apk
           path: "**/build/outputs/apk/debug/app-debug.apk"
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: build-log
-          path: "**/build.log"
