@@ -1,0 +1,69 @@
+name: Build Meera AI APK
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Unzip project (newest zip only)
+        run: |
+          rm -rf _src
+          z=$(ls -t *.zip 2>/dev/null | head -n 1 || true)
+          if [ -n "$z" ]; then
+            echo "Using zip: $z"
+            unzip -q -o "$z" -d _src
+          else
+            echo "No zip in repo root, using repo files"
+          fi
+
+      - name: Find project folder
+        id: proj
+        run: |
+          f=$(find . -maxdepth 4 -name settings.gradle.kts | head -n 1)
+          if [ -z "$f" ]; then echo "settings.gradle.kts not found"; find . -maxdepth 4 -not -path "./.git/*" | head -50; exit 1; fi
+          d=$(dirname "$f")
+          echo "Project folder: $d"
+          echo "dir=$d" >> "$GITHUB_OUTPUT"
+
+      - name: Accept SDK licenses and get platform 34
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" || true
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Show compile errors (only if build failed)
+        if: failure()
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          echo "===== KOTLIN / BUILD ERRORS ====="
+          grep -E "^e: |error:|What went wrong" -A3 build.log | head -80 || true
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: MeeraAI-debug-apk
+          path: "**/build/outputs/apk/debug/app-debug.apk"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: "**/build.log"
